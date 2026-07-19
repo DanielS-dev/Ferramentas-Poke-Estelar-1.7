@@ -1262,7 +1262,7 @@ namespace Assets_Editor
             CurrentObjectAppearance.FrameGroup[(int)SprGroupSlider.Value].SpriteInfo?.IsOpaque = A_SprOpaque.IsChecked ?? false;
         }
 
-        private void ObjectSave_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        private void SaveCurrentObject(bool showFeedback = true)
         {
             var flags = CurrentObjectAppearance.Flags;
 
@@ -1801,7 +1801,15 @@ namespace Assets_Editor
             UpdateShowList(ObjectMenu.SelectedIndex, CurrentObjectAppearance.Id);
             AnimateSelectedListItem(showList);
 
-            StatusBar.MessageQueue?.Enqueue($"Saved Current Object.", null, null, null, false, true, TimeSpan.FromSeconds(2));
+            if (showFeedback)
+            {
+                StatusBar.MessageQueue?.Enqueue($"Saved Current Object.", null, null, null, false, true, TimeSpan.FromSeconds(2));
+            }
+        }
+
+        private void ObjectSave_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            SaveCurrentObject();
         }
         private void CopyObjectFlags(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
@@ -1853,6 +1861,8 @@ namespace Assets_Editor
 
         private void Compile_Click(object sender, RoutedEventArgs e)
         {
+            SaveCurrentObject(false);
+            NormalizeAppearancesAnimationMetadata(MainWindow.appearances);
             File.Copy(System.IO.Path.Combine(MainWindow._assetsPath, "catalog-content.json"), System.IO.Path.Combine(MainWindow._assetsPath, "catalog-content.json-bak"), true);
             File.Copy(MainWindow._datPath, MainWindow._datPath + "-bak", true);
             ProcessTransparentSheets();
@@ -2645,6 +2655,82 @@ namespace Assets_Editor
             return CurrentObjectAppearance.FrameGroup[(int)SprGroupSlider.Value].SpriteInfo.Animation;
         }
 
+        private static ANIMATION_LOOP_TYPE? GetLoopTypeFromSelectedIndex(int selectedIndex)
+        {
+            return selectedIndex switch
+            {
+                0 => ANIMATION_LOOP_TYPE.Pingpong,
+                1 => ANIMATION_LOOP_TYPE.Infinite,
+                2 => ANIMATION_LOOP_TYPE.Counted,
+                _ => null
+            };
+        }
+
+        private static ANIMATION_LOOP_TYPE ResolveLoopType(SpriteAnimation animation)
+        {
+            if (animation.HasLoopType)
+            {
+                return animation.LoopType;
+            }
+
+            return animation.HasLoopCount && animation.LoopCount > 0
+                ? ANIMATION_LOOP_TYPE.Counted
+                : ANIMATION_LOOP_TYPE.Infinite;
+        }
+
+        private static void NormalizeAnimationLoopMetadata(SpriteAnimation? animation)
+        {
+            if (animation == null)
+            {
+                return;
+            }
+
+            var resolvedLoopType = ResolveLoopType(animation);
+            animation.LoopType = resolvedLoopType;
+
+            if (resolvedLoopType == ANIMATION_LOOP_TYPE.Infinite)
+            {
+                animation.ClearLoopCount();
+                return;
+            }
+
+            if (!animation.HasLoopCount)
+            {
+                animation.LoopCount = 0;
+            }
+        }
+
+        private static void NormalizeAppearancesAnimationMetadata(Appearances appearances)
+        {
+            foreach (var appearance in appearances.Object)
+            {
+                NormalizeAppearanceAnimationMetadata(appearance);
+            }
+
+            foreach (var appearance in appearances.Outfit)
+            {
+                NormalizeAppearanceAnimationMetadata(appearance);
+            }
+
+            foreach (var appearance in appearances.Effect)
+            {
+                NormalizeAppearanceAnimationMetadata(appearance);
+            }
+
+            foreach (var appearance in appearances.Missile)
+            {
+                NormalizeAppearanceAnimationMetadata(appearance);
+            }
+        }
+
+        private static void NormalizeAppearanceAnimationMetadata(Appearance appearance)
+        {
+            foreach (var frameGroup in appearance.FrameGroup)
+            {
+                NormalizeAnimationLoopMetadata(frameGroup.SpriteInfo.Animation);
+            }
+        }
+
         private void SprDefaultPhase_ValueChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
             GetCurrentAnimation()?.DefaultStartPhase = (uint)(SprDefaultPhase.Value ?? 0);
@@ -2652,7 +2738,14 @@ namespace Assets_Editor
 
         private void SprLoopCount_ValueChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
         {
-            GetCurrentAnimation()?.LoopCount = (uint)(SprLoopCount.Value ?? 0);
+            var animation = GetCurrentAnimation();
+            if (animation == null)
+            {
+                return;
+            }
+
+            animation.LoopCount = (uint)(SprLoopCount.Value ?? 0);
+            NormalizeAnimationLoopMetadata(animation);
         }
 
         private void SprSynchronized_Click(object sender, RoutedEventArgs e)
@@ -2673,12 +2766,15 @@ namespace Assets_Editor
                 return;
             }
 
-            if (SprLoopType.SelectedIndex == 0)
-                animation.LoopType = ANIMATION_LOOP_TYPE.Pingpong;
-            else if (SprLoopType.SelectedIndex == 1)
-                animation.LoopType = ANIMATION_LOOP_TYPE.Infinite;
-            else if (SprLoopType.SelectedIndex == 2)
-                animation.LoopType = ANIMATION_LOOP_TYPE.Counted;
+            var selectedLoopType = GetLoopTypeFromSelectedIndex(SprLoopType.SelectedIndex);
+            if (selectedLoopType == null)
+            {
+                animation.ClearLoopType();
+                return;
+            }
+
+            animation.LoopType = selectedLoopType.Value;
+            NormalizeAnimationLoopMetadata(animation);
         }
         private void SearchItem_Click(object sender, RoutedEventArgs e)
         {
